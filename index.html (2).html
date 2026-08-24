@@ -136,6 +136,43 @@
   .flash.go{ animation: flash .45s ease; }
   @keyframes flash{ 0%{opacity:0;} 15%{opacity:0.5;} 100%{opacity:0;} }
 
+  /* ---------- Celebration: confetti + glow + toast ---------- */
+  .confetti-layer{ position:absolute; inset:0; overflow:hidden; pointer-events:none; z-index:15; }
+  .confetti-piece{
+    position:absolute; top:-12px; left:50%;
+    width:6px; height:11px; opacity:0.95;
+    animation: confetti-fall 1200ms ease-in forwards;
+  }
+  @keyframes confetti-fall{
+    to{ transform: translate(var(--dx), 420px) rotate(var(--rot)); opacity:0; }
+  }
+  .stamp.earn{ animation: pop .5s cubic-bezier(.34,1.56,.64,1), glow-ring 900ms ease-out; }
+  @keyframes glow-ring{
+    0%{ box-shadow:0 0 0 0 rgba(57,255,136,0.55); }
+    100%{ box-shadow:0 0 0 16px rgba(57,255,136,0); }
+  }
+  .stamp-toast{
+    position:absolute; top:14px; left:50%; z-index:20;
+    transform:translateX(-50%) translateY(-14px);
+    background:var(--green); color:#0c0c0c; font-weight:700; font-size:11px;
+    padding:8px 16px; border-radius:20px; white-space:nowrap;
+    opacity:0; transition: all .35s cubic-bezier(.2,.8,.2,1);
+  }
+  .stamp-toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+  .stamp-toast.gold{ background:var(--gold); }
+
+  .reward-choice{ display:flex; flex-direction:column; gap:8px; margin-top:12px; }
+  .reward-choice button{
+    background:var(--ink); border:1px solid var(--gold); color:var(--gold);
+    font-family:var(--body); font-weight:600; font-size:11px; letter-spacing:0.04em;
+    text-transform:uppercase; padding:10px; cursor:pointer; transition: all .2s ease;
+  }
+  .reward-choice button:hover{ background:var(--gold); color:#0c0c0c; }
+  .reward-selected{
+    margin-top:10px; font-size:12px; color:var(--gold); font-weight:600;
+    display:flex; align-items:center; justify-content:center; gap:6px;
+  }
+
   .not-found{ text-align:center; padding:40px 10px; }
   .not-found .nf-icon{ font-size:32px; margin-bottom:10px; }
   .not-found h3{ font-family:var(--display); font-size:16px; margin:0 0 8px; }
@@ -184,12 +221,45 @@ function genToken(){
 function getOrCreateCustomer(phone, name){
   const customers = loadCustomers();
   if(!customers[phone]){
-    customers[phone] = { name: name || 'Customer', phone, stamps:0, lifetimeStamps:0, rewardReady:false, createdAt: Date.now() };
+    customers[phone] = { name: name || 'Customer', phone, stamps:0, lifetimeStamps:0, rewardReady:false, chosenReward:null, createdAt: Date.now() };
   } else if(name && name.trim() && customers[phone].name !== name.trim()){
     customers[phone].name = name.trim();
   }
   saveCustomers(customers);
   return customers[phone];
+}
+
+const MILESTONES = {
+  3: { message: "3 stamps in — you're on your way 👕", tone: "green" },
+  6: { message: "6 stamps! More than halfway there ✨", tone: "green" },
+  9: { message: "Just 1 more stamp for your reward!", tone: "gold" },
+};
+
+function chooseReward(phone, choice){
+  const customers = loadCustomers();
+  if(customers[phone]){
+    customers[phone].chosenReward = choice;
+    saveCustomers(customers);
+  }
+  renderCustomerScreen(viewCustomerReadonly(phone));
+}
+
+function spawnConfetti(layer, count){
+  const colors = ['#39ff88', '#c9a24a', '#f6f4ee'];
+  for(let i=0;i<count;i++){
+    const piece = document.createElement('div');
+    piece.className = 'confetti-piece';
+    const dx = (Math.random() * 220 - 110) + 'px';
+    const rot = (Math.random() * 520 - 260) + 'deg';
+    piece.style.setProperty('--dx', dx);
+    piece.style.setProperty('--rot', rot);
+    piece.style.left = (40 + Math.random() * 20) + '%';
+    piece.style.background = colors[Math.floor(Math.random()*colors.length)];
+    piece.style.animationDelay = (Math.random() * 200) + 'ms';
+    piece.style.animationDuration = (900 + Math.random()*500) + 'ms';
+    layer.appendChild(piece);
+    setTimeout(()=>piece.remove(), 1600);
+  }
 }
 
 /* ================= CATALOG ================= */
@@ -483,6 +553,8 @@ function renderCustomerScreen(result){
         <div class="notch"></div>
         <div class="screen">
           <div class="flash" id="flash"></div>
+          <div class="confetti-layer" id="confettiLayer"></div>
+          <div class="stamp-toast" id="stampToast"></div>
           <div id="cardBody"></div>
         </div>
       </div>
@@ -536,18 +608,58 @@ function renderCustomerScreen(result){
     progressText.innerHTML = `<b>Reward unlocked 🎉</b>`;
     rewardBox.classList.add('ready');
     rewardTitle.textContent = 'Reward Unlocked';
-    rewardSub.textContent = 'Show this screen in-store to redeem 10% off your next purchase.';
+
+    if(c.chosenReward){
+      rewardSub.textContent = 'Show this screen in-store to redeem.';
+      const selected = document.createElement('div');
+      selected.className = 'reward-selected';
+      selected.innerHTML = `${cardCheckIcon.replace('16px','14px')} ${c.chosenReward}`;
+      rewardBox.appendChild(selected);
+    } else {
+      rewardSub.textContent = 'Pick your reward:';
+      const choiceWrap = document.createElement('div');
+      choiceWrap.className = 'reward-choice';
+      choiceWrap.innerHTML = `
+        <button id="pickDiscount">10% Off Next Purchase</button>
+        <button id="pickPolo">Free Polo Shirt</button>`;
+      rewardBox.appendChild(choiceWrap);
+      document.getElementById('pickDiscount').onclick = () => chooseReward(c.phone, '10% Off Next Purchase');
+      document.getElementById('pickPolo').onclick = () => chooseReward(c.phone, 'Free Polo Shirt');
+    }
   } else {
     progressText.innerHTML = `<b>${remaining}</b> stamp${remaining===1?'':'s'} away from your reward`;
     rewardTitle.textContent = 'Keep shopping';
-    rewardSub.textContent = 'Collect 10 stamps to unlock 10% off your next purchase.';
+    rewardSub.textContent = 'Collect 10 stamps to unlock 10% off your next purchase or a free polo.';
   }
 
   if(result.status === 'stamped'){
     const flash = document.getElementById('flash');
     flash.classList.add('go');
+
     const cell = grid.children[result.animateIndex];
-    if(cell){ cell.classList.add('pop'); setTimeout(()=>cell.classList.remove('pop'), 500); }
+    if(cell){ cell.classList.add('earn'); setTimeout(()=>cell.classList.remove('earn'), 900); }
+
+    const toast = document.getElementById('stampToast');
+    const n = c.stamps;
+    let toastMsg = `+1 Stamp Added 🎉`;
+    let gold = false;
+
+    if(n >= TOTAL){
+      toastMsg = `Card Complete — Reward Unlocked! 🏆`;
+      gold = true;
+      spawnConfetti(document.getElementById('confettiLayer'), 34);
+    } else if(MILESTONES[n]){
+      toastMsg = MILESTONES[n].message;
+      gold = MILESTONES[n].tone === 'gold';
+      spawnConfetti(document.getElementById('confettiLayer'), 16);
+    } else {
+      spawnConfetti(document.getElementById('confettiLayer'), 10);
+    }
+
+    toast.textContent = toastMsg;
+    toast.classList.toggle('gold', gold);
+    requestAnimationFrame(()=> toast.classList.add('show'));
+    setTimeout(()=> toast.classList.remove('show'), 2600);
   }
 }
 </script>
